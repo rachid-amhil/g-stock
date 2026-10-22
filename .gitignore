@@ -1,0 +1,9 @@
+# Private inventory data and runtime database must never be pushed with the app.
+work/seed.json
+data/
+.env
+.env.*
+!.env.example
+outputs/Gestion de stock.html
+.pnpm-cache/
+.netlify/
