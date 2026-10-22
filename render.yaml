@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: gestion-stock
+    runtime: node
+    plan: starter
+    buildCommand: node scripts/build.mjs
+    startCommand: node backend/server.mjs
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 24
+      - key: HOST
+        value: 0.0.0.0
+      - key: DB_PATH
+        value: /var/data/gestion-stock.sqlite
+      - key: BOOTSTRAP_ADMIN_EMAIL
+        sync: false
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
+      - key: BOOTSTRAP_ADMIN_NAME
+        value: Super Admin
+      - key: RESEND_API_KEY
+        sync: false
+      - key: INVITATION_FROM
+        sync: false
+      - key: PUBLIC_APP_URL
+        sync: false
+    disk:
+      name: stock-data
+      mountPath: /var/data
+      sizeGB: 1

@@ -1,0 +1,12 @@
+{
+  "name": "gestion-stock-rbac",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "export:supabase": "node scripts/export-supabase-migration.mjs",
+    "start": "node backend/server.mjs",
+    "test": "node backend/rbac.test.mjs"
+  },
+  "engines": { "node": ">=24.0.0" }
+}

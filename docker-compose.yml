@@ -1,0 +1,18 @@
+services:
+  gestion-stock:
+    build: .
+    container_name: gestion-stock
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8787
+      DB_PATH: /var/lib/gestion-stock/gestion-stock.sqlite
+    volumes:
+      - stock-data:/var/lib/gestion-stock
+    ports:
+      - "127.0.0.1:8787:8787"
+
+volumes:
+  stock-data:

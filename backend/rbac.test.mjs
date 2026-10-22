@@ -1,0 +1,53 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+async function api(base,path,{method='GET',body,cookie}={}) { const headers={};if(body!==undefined)headers['content-type']='application/json';if(cookie)headers.cookie=cookie;const r=await fetch(base+path,{method,headers,body:body===undefined?undefined:JSON.stringify(body)});return {status:r.status,body:await r.json(),cookie:r.headers.getSetCookie?.()[0]?.split(';')[0]}; }
+
+test('Authentication and server-side role permissions enforce allowed and denied operations', async t => {
+  const dir=await mkdtemp(join(tmpdir(),'stock-rbac-')); process.env.DB_PATH=join(dir,'test.sqlite'); process.env.RBAC_SKIP_SEED='1';
+  const backend=await import(`./server.mjs?test=${Date.now()}`); await backend.bootstrapAdmin('root@example.test','RootPass!123456','Root');
+  await new Promise(r=>backend.server.listen(0,'127.0.0.1',r)); const port=backend.server.address().port, base=`http://127.0.0.1:${port}`;
+  t.after(async()=>{await new Promise(r=>backend.server.close(r));backend.db.close();await rm(dir,{recursive:true,force:true});});
+  const appPage=await fetch(base).then(r=>r.text());assert.match(appPage,/Connexion sécurisée/);assert.doesNotMatch(appPage,/"quantity"\s*:\s*\d+/);
+  assert.equal((await api(base,'/api/state')).status,401);
+  assert.equal((await api(base,'/api/auth/login',{method:'POST',body:{email:'root@example.test',password:'wrong'}})).status,401);
+  const root=await api(base,'/api/auth/login',{method:'POST',body:{email:'root@example.test',password:'RootPass!123456'}});
+  assert.equal(root.status,200); assert.ok(root.cookie);
+  assert.equal((await api(base,'/api/admin/users',{cookie:root.cookie})).status,200);
+  const consult=await api(base,'/api/admin/users',{method:'POST',cookie:root.cookie,body:{name:'Reader',email:'reader@example.test',password:'ReaderPass!123456',role:'Consultation'}});
+  assert.equal(consult.status,201);
+  const reader=await api(base,'/api/auth/login',{method:'POST',body:{email:'reader@example.test',password:'ReaderPass!123456'}});
+  assert.equal(reader.status,200);
+  const view=await api(base,'/api/state',{cookie:reader.cookie}); assert.equal(view.status,200); assert.deepEqual(view.body.inventory,[]);
+  assert.equal((await api(base,'/api/admin/users',{method:'POST',cookie:reader.cookie,body:{name:'X',email:'x@example.test',password:'LongPassword!123',role:'Consultation'}})).status,403);
+  assert.equal((await api(base,'/api/state',{method:'PUT',cookie:reader.cookie,body:{_version:view.body._version,inventory:[{type:'Router'}]}})).status,403);
+  const imported=await api(base,'/api/migration/import',{method:'POST',cookie:root.cookie,body:{inventory:[{type:'Router',quantity:2}],movements:[],loans:[],office:[]}});
+  assert.equal(imported.status,200);
+  const stock=await api(base,'/api/admin/users',{method:'POST',cookie:root.cookie,body:{name:'Keeper',email:'keeper@example.test',password:'KeeperPass!123456',role:'Magasinier'}});
+  assert.equal(stock.status,201);
+  const keeper=await api(base,'/api/auth/login',{method:'POST',body:{email:'keeper@example.test',password:'KeeperPass!123456'}});
+  assert.equal(keeper.status,200);
+  let stockState=await api(base,'/api/state',{cookie:keeper.cookie});
+  const write=await api(base,'/api/state',{method:'PUT',cookie:keeper.cookie,body:{_version:stockState.body._version,inventory:[{type:'Router',quantity:2},{type:'Switch',quantity:1}]}});assert.equal(write.status,200);
+  assert.equal((await api(base,'/api/state',{method:'PUT',cookie:keeper.cookie,body:{_version:stockState.body._version,inventory:[{type:'Router',quantity:2},{type:'Switch',quantity:1}]}})).status,409);
+  stockState=await api(base,'/api/state',{cookie:keeper.cookie});
+  assert.equal((await api(base,'/api/state',{method:'PUT',cookie:keeper.cookie,body:{_version:stockState.body._version,movements:[{id:'movement-1',type:'Router'}]}})).status,200);
+  stockState=await api(base,'/api/state',{cookie:keeper.cookie});
+  assert.equal((await api(base,'/api/state',{method:'PUT',cookie:keeper.cookie,body:{_version:stockState.body._version,inventory:[{type:'Router',quantity:2}]}})).status,403);
+  assert.equal((await api(base,'/api/state',{method:'PUT',cookie:keeper.cookie,body:{_version:stockState.body._version,inventory:[{type:'Laptop',quantity:1},{type:'Tablet',quantity:1}]}})).status,403);
+  const admin=await api(base,'/api/admin/users',{method:'POST',cookie:root.cookie,body:{name:'Manager',email:'manager@example.test',password:'ManagerPass!1234',role:'Admin'}});
+  assert.equal(admin.status,201);
+  const manager=await api(base,'/api/auth/login',{method:'POST',body:{email:'manager@example.test',password:'ManagerPass!1234'}});
+  assert.equal(manager.status,200);
+  const staff=await api(base,'/api/admin/users',{method:'POST',cookie:manager.cookie,body:{name:'Staff',email:'staff@example.test',password:'StaffPass!123456',role:'Consultation'}});
+  assert.equal(staff.status,201);
+  assert.equal((await api(base,`/api/admin/users/${staff.body.user.id}`,{method:'DELETE',cookie:manager.cookie})).status,403);
+  assert.equal((await api(base,'/api/admin/users',{method:'POST',cookie:manager.cookie,body:{name:'Escalated',email:'escalated@example.test',password:'EscalatedPass!123',role:'Super Admin'}})).status,403);
+  assert.equal((await api(base,'/api/admin/roles/permissions',{method:'PUT',cookie:manager.cookie,body:{role:'Admin',permissions:[]}})).status,403);
+  assert.equal((await api(base,`/api/admin/users/${root.body.user.id}`,{method:'PATCH',cookie:root.cookie,body:{active:false,roles:['Super Admin']}})).status,409);
+  assert.equal((await api(base,`/api/admin/users/${root.body.user.id}`,{method:'PATCH',cookie:root.cookie,body:{roles:['Admin']}})).status,409);
+  assert.equal((await api(base,`/api/admin/users/${root.body.user.id}`,{method:'DELETE',cookie:root.cookie})).status,409);
+});

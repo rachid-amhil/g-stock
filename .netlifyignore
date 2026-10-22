@@ -1,0 +1,6 @@
+data/
+work/seed.json
+outputs/Gestion de stock.html
+.pnpm-cache/
+backend/rbac.test.mjs
+README*.md
